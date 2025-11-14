@@ -55,3 +55,12 @@ args = "python test.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "analyze"
+mode = "sequential"
+author = 640404
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python analyze.py"
