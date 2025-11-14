@@ -18,6 +18,7 @@ def query_llm(prompt, model="meta-llama/Meta-Llama-3-8B-Instruct", max_tokens=20
         "max_tokens": max_tokens,
         "temperature": 0.7  # For creative code gen
     }
+    response = None
     try:
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
@@ -25,11 +26,12 @@ def query_llm(prompt, model="meta-llama/Meta-Llama-3-8B-Instruct", max_tokens=20
         return generated
     except requests.exceptions.RequestException as e:
         print(f"LLM query error: {e}")
-        try:
-            error_details = response.json()
-            print(f"Error details: {error_details}")
-        except:
-            print(f"Response text: {response.text}")
+        if response is not None:
+            try:
+                error_details = response.json()
+                print(f"Error details: {error_details}")
+            except:
+                print(f"Response text: {response.text}")
         return None
     except KeyError:
         print("Invalid response from LLM.")
