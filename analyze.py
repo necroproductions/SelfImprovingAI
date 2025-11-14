@@ -1,5 +1,6 @@
 # analyze.py: Analyze performance
 import time
+from core import process_query
 
 def analyze_performance(func, test_cases):
     """Run tests and measure time/accuracy."""
