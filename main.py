@@ -2,7 +2,7 @@
 import threading
 import time
 import os
-from monitor import monitor_resources
+from test import monitor_resources
 from reflect import reflect_and_expand, get_current_phase
 from core import process_query
 from logger import log_change

@@ -23,6 +23,7 @@ def ethical_check(diff_str, phase):
 
 def self_modify(improvement_query, target_file='core.py', test_cases=None, max_diff_lines=50):
     """Use LLM to generate unified diff patch; apply incrementally."""
+    backup_file = target_file + '.backup'
     try:
         subprocess.run(['git', 'add', '.'], check=True)
         subprocess.run(['git', 'commit', '-m', 'Pre-modification commit'], check=True)
@@ -46,7 +47,6 @@ def self_modify(improvement_query, target_file='core.py', test_cases=None, max_d
 
         updated_code = apply_patch(current_code, generated_diff)
 
-        backup_file = target_file + '.backup'
         os.system(f'cp {target_file} {backup_file}')
 
         with open(target_file, 'w') as f:
