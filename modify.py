@@ -2,22 +2,11 @@
 import os
 import subprocess
 import difflib
-import json
 from llm_query import query_llm
 from analyze import analyze_performance, detect_fail_state
 from logger import log_change
 from utils import apply_patch
-
-def get_current_phase():
-    """Load current phase from phase.json file."""
-    try:
-        if os.path.exists('phase.json'):
-            with open('phase.json', 'r') as f:
-                return json.load(f).get('phase', 0)
-        return 0
-    except Exception as e:
-        log_change("Phase load error", str(e))
-        return 0
+from phase import get_current_phase
 
 def ethical_check(diff_str, phase):
     """Check diff for ethical issues."""
@@ -37,7 +26,11 @@ def self_modify(improvement_query, target_file='core.py', test_cases=None, max_d
     backup_file = target_file + '.backup'
     try:
         subprocess.run(['git', 'add', '.'], check=True)
-        subprocess.run(['git', 'commit', '-m', 'Pre-modification commit'], check=True)
+        
+        # Only commit if there are changes to commit
+        result = subprocess.run(['git', 'diff', '--cached', '--quiet'], capture_output=True)
+        if result.returncode != 0:  # returncode != 0 means there are changes
+            subprocess.run(['git', 'commit', '-m', 'Pre-modification commit'], check=True)
 
         with open(target_file, 'r') as f:
             current_code = f.read()
@@ -79,14 +72,19 @@ def self_modify(improvement_query, target_file='core.py', test_cases=None, max_d
 
     except Exception as e:
         log_change("Modification failed", str(e))
-        os.system(f'mv {backup_file} {target_file}')
-        rollback()
+        # Restore from backup file first (simpler and safer than git rollback)
+        if os.path.exists(backup_file):
+            os.system(f'mv {backup_file} {target_file}')
+            log_change("Restored from backup file", target_file)
+        # Only use git rollback if backup restoration fails
+        else:
+            rollback()
         raise
 
 def rollback():
-    """Revert to previous commit."""
+    """Revert to previous commit on current branch."""
     try:
-        subprocess.run(['git', 'checkout', 'HEAD~1'], check=True)
+        subprocess.run(['git', 'reset', '--hard', 'HEAD~1'], check=True)
         log_change("Rolled back")
     except subprocess.CalledProcessError as e:
         log_change("Rollback error", str(e))

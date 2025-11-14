@@ -15,8 +15,16 @@ def monitor_resources(max_cpu=95, max_mem=28000):  # max_cpu in %, max_mem in MB
     except Exception as e:
         print(f"Error in monitoring: {e}")
 
-# Run in background (simulate with thread if needed)
-import threading
-threading.Thread(target=monitor_resources).start()
-
-print("Sandbox monitoring active.")
+# Run in background only if executed directly
+if __name__ == "__main__":
+    import threading
+    threading.Thread(target=monitor_resources).start()
+    print("Sandbox monitoring active.")
+    
+    # Keep the main thread alive
+    import time
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Monitoring stopped.")
