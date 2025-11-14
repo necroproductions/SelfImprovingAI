@@ -1,11 +1,16 @@
-# reflect.py: Incremental meta-reflection with patching (web-friendly outputs)
 import os
-import json  # For phase.json
+import threading
 from core import process_query
-from modify import self_modify
-from analyze import analyze_performance
 from logger import log_change
 from phase import get_current_phase, advance_phase, PHASES
+
+# --- New Global State for Web Interaction ---
+# Store patch proposals waiting for user approval
+PENDING_PATCH = threading.Lock()
+PENDING_PATCH_QUERY = None
+PENDING_PATCH_TESTS = None
+PENDING_PATCH_TARGET = 'core.py'
+# -------------------------------------------
 
 def generate_improvement_queries(phase):
     """Generate phase-specific patch queries."""
@@ -17,66 +22,91 @@ def generate_improvement_queries(phase):
             3: ["Patch to handle follow-up questions based on history."],
             4: ["Patch to implement a basic template-based code generator to reduce LLM dependency."]
         }.get(phase, [])
-        self_idea = process_query(f"Suggest one small patch idea for {PHASES[phase]}")
-        if isinstance(self_idea, str) and self_idea and "don't understand" not in self_idea.lower():
+        # Call process_query without history to prevent reflection from causing new reflection
+        self_idea = process_query(f"Suggest one small patch idea for {PHASES[phase]}", history=[]) 
+        if isinstance(self_idea, str) and self_idea:
             base_queries.append(self_idea)
         return base_queries
     except Exception as e:
         log_change("Query generation error", str(e))
         return []
 
-def reflect_and_expand(test_cases, auto_approve=False):
-    """Reflect phase-by-phase with patches. Returns list of output lines for web rendering."""
-    output_lines = []  # Collect for web chat
+def reflect_and_expand(test_cases):
+    """Reflect phase-by-phase without interactive prompts."""
+    global PENDING_PATCH_QUERY, PENDING_PATCH_TESTS, PENDING_PATCH_TARGET
     try:
         phase = get_current_phase()
-        output_lines.append(f"=== Starting reflection for Phase {phase} ===")
 
         # Check if reached terminal phase
         if phase >= len(PHASES):
             log_change("System reached terminal phase", "All self-improvement phases complete")
-            output_lines.append("🎉 System has completed all self-improvement phases!")
-            return output_lines
+            return
+
+        # Check if a patch is already pending
+        with PENDING_PATCH:
+            if PENDING_PATCH_QUERY is not None:
+                log_change("Skipping reflection", "Another patch is already pending approval.")
+                return
 
         queries = generate_improvement_queries(phase)
+
+        # For simplicity, we only propose the first idea generated
         if not queries:
-            output_lines.append("No queries generated—skipping reflection.")
-            return output_lines
+            log_change("Reflection finished", "No improvement queries generated.")
+            return
 
-        output_lines.append(f"Found {len(queries)} queries to evaluate.")
-        for q in queries:
-            output_lines.append(f"Query: {q}")
-            eval_prompt = f"Is this small, safe patch incremental? {q}"
-            eval_response = process_query(eval_prompt)
-            output_lines.append(f"Eval response: '{eval_response}'")
+        q = queries[0]
+        eval_prompt = f"Is this small, safe patch incremental? Answer YES or NO. {q}"
+        eval_response = process_query(eval_prompt, history=[])
 
-            # Bypass eval for Phase 0 (early AI can't self-assess yet)
-            approved = ("yes" in str(eval_response).lower() or 
-                        auto_approve or 
-                        phase == 0)
-            if approved:
-                output_lines.append("Query approved for patching!")
-                # For web, simulate approval (or pass callback; here assume auto for demo)
-                if auto_approve:
-                    approve = 'y'
-                else:
-                    # In web, this would be handled via session—default 'y' for now
-                    approve = input(f"Approve patch for '{q}'? (y/n): ").strip()  # Fallback for console
-                if approve.lower() == 'y':
-                    output_lines.append("Applying patch...")
-                    self_modify(q, test_cases=test_cases, max_diff_lines=30)
-                    log_change("Incremental patch via reflection", q)
-                    advance_phase()
-                    output_lines.append(f"Reflection complete! Advanced to Phase {get_current_phase()}.")
-                    output_lines.append("Check changes.log for details and core.py for updates.")
-                    return output_lines  # One at a time for safety
-                else:
-                    output_lines.append("Patch declined by user.")
-            else:
-                output_lines.append("Query skipped—not approved.")
-        output_lines.append("=== Reflection ended (no patches applied) ===")
-        return output_lines
+        if "yes" in str(eval_response).lower():
+            log_change("Patch Proposal Generated", f"Query: {q}")
+
+            # Save the proposal to the global state for the web app to pick up
+            with PENDING_PATCH:
+                PENDING_PATCH_QUERY = q
+                PENDING_PATCH_TESTS = test_cases
+                PENDING_PATCH_TARGET = 'core.py' # Default target
+                log_change("Patch Proposal Awaiting Approval", q)
+        else:
+            log_change("Patch Proposal Rejected by Self-Evaluation", q)
+
     except Exception as e:
         log_change("Reflection error", str(e))
-        output_lines.append(f"DEBUG: Reflection error: {e}")
-        return output_lines
+
+def process_patch_decision(decision):
+    """Called by the web API to handle user's patch approval or rejection."""
+    global PENDING_PATCH_QUERY, PENDING_PATCH_TESTS, PENDING_PATCH_TARGET
+    from modify import self_modify
+
+    with PENDING_PATCH:
+        if PENDING_PATCH_QUERY is None:
+            return "No patch pending."
+
+        q = PENDING_PATCH_QUERY
+        tests = PENDING_PATCH_TESTS
+        target = PENDING_PATCH_TARGET
+
+        # Clear the pending state immediately after retrieving
+        PENDING_PATCH_QUERY = None
+        PENDING_PATCH_TESTS = None
+
+        if decision.lower() == 'approve':
+            log_change("User Approved Patch", q)
+            try:
+                # Execution happens in the main thread for simplicity, blocking web response briefly
+                self_modify(q, target_file=target, test_cases=tests, max_diff_lines=30)
+                advance_phase()
+                return f"Patch applied successfully! Advanced to Phase {get_current_phase()}"
+            except Exception as e:
+                return f"Patch failed to apply/test: {e}"
+        else:
+            log_change("User Rejected Patch", q)
+            return "Patch proposal rejected."
+
+# Example (comment out for production)
+if __name__ == "__main__":
+    tests = [("hello", "Hello! How can I help?"), ("sort 3 1 2", [1, 2, 3])]
+    # Now non-interactive in main module loop
+    reflect_and_expand(tests)
+

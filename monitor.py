@@ -1,33 +1,56 @@
-# monitor.py: Quiet resource monitoring with web-alert queue
 import psutil
 import time
+import threading
+from collections import deque
 from logger import log_change
 
-alert_queue = []  # Global queue for web to poll
+# A thread-safe queue to hold system alerts
+ALERT_QUEUE = deque(maxlen=20)
 
-def monitor_resources(max_cpu=95, max_mem=28000, quiet=True):
-    """Monitor system resources. Alerts queued for web display."""
-    global alert_queue
+def get_alerts():
+    """Retrieves all current alerts from the queue and clears it."""
+    alerts = list(ALERT_QUEUE)
+    ALERT_QUEUE.clear()
+    return alerts
+
+def monitor_resources(max_cpu=95, max_mem=28000, quiet=False):  # max_cpu in %, max_mem in MB
+    """Monitor system resources to prevent exhaustion, adding alerts to the queue."""
+    log_change("Starting resource monitor...")
     try:
         while True:
             cpu = psutil.cpu_percent(interval=1)
-            mem = psutil.virtual_memory().used / (1024 ** 2)
+            mem = psutil.virtual_memory().used / (1024 ** 2)  # Convert to MB
+
             if not quiet:
-                print(f"Current - CPU: {cpu:.1f}%, Memory: {mem:.0f} MB")  # Legacy
-            if cpu > max_cpu or mem > max_mem:
-                alert = f"⚠️ Resource limit exceeded! CPU: {cpu:.1f}% (max: {max_cpu}%), Memory: {mem:.0f} MB (max: {max_mem} MB)"
-                alert_queue.append(alert)
-                log_change("Resource alert", alert)
-                print(alert)  # Fallback console
-                raise SystemExit
+                print(f"Current - CPU: {cpu:.1f}%, Memory: {mem:.0f} MB")
+
+            if cpu > max_cpu:
+                alert = f"Resource limit exceeded: CPU at {cpu:.1f}% (max: {max_cpu}%)"
+                ALERT_QUEUE.append(alert)
+                log_change("RESOURCE ALERT", alert)
+
+            if mem > max_mem:
+                alert = f"Resource limit exceeded: Memory at {mem:.0f} MB (max: {max_mem} MB)"
+                ALERT_QUEUE.append(alert)
+                log_change("RESOURCE ALERT", alert)
+
             time.sleep(1)
     except Exception as e:
-        alert_queue.append(f"Monitor error: {e}")
-        log_change("Monitor error", str(e))
+        log_change("Error in monitoring thread", str(e))
+        if not quiet:
+            print(f"Error in monitoring: {e}")
 
-def get_alerts():
-    """Pop alerts for web."""
-    global alert_queue
-    alerts = alert_queue.copy()
-    alert_queue.clear()
-    return alerts
+# Start the monitoring thread if run directly (useful for testing)
+if __name__ == "__main__":
+    threading.Thread(target=monitor_resources, daemon=True).start()
+    print("Sandbox monitoring active. Press Ctrl+C to stop.")
+    try:
+        while True:
+            time.sleep(1)
+            alerts = get_alerts()
+            if alerts:
+                for alert in alerts:
+                    print(f"[ALERT]: {alert}")
+    except KeyboardInterrupt:
+        print("Monitoring stopped.")
+
