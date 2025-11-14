@@ -2,11 +2,22 @@
 import os
 import subprocess
 import difflib
+import json
 from llm_query import query_llm
 from analyze import analyze_performance, detect_fail_state
 from logger import log_change
 from utils import apply_patch
-from reflect import get_current_phase
+
+def get_current_phase():
+    """Load current phase from phase.json file."""
+    try:
+        if os.path.exists('phase.json'):
+            with open('phase.json', 'r') as f:
+                return json.load(f).get('phase', 0)
+        return 0
+    except Exception as e:
+        log_change("Phase load error", str(e))
+        return 0
 
 def ethical_check(diff_str, phase):
     """Check diff for ethical issues."""
