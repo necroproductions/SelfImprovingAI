@@ -3,6 +3,8 @@ import threading
 from core import process_query
 from logger import log_change
 from phase import get_current_phase, advance_phase, PHASES
+# Import get_alerts from monitor to push failed reflection messages to UI
+from monitor import get_alerts 
 
 # --- New Global State for Web Interaction ---
 # Store patch proposals waiting for user approval
@@ -40,39 +42,45 @@ def reflect_and_expand(test_cases):
         # Check if reached terminal phase
         if phase >= len(PHASES):
             log_change("System reached terminal phase", "All self-improvement phases complete")
+            get_alerts().append("System reached terminal phase.")
             return
 
         # Check if a patch is already pending
         with PENDING_PATCH:
             if PENDING_PATCH_QUERY is not None:
                 log_change("Skipping reflection", "Another patch is already pending approval.")
+                get_alerts().append("Reflection paused: A patch is already awaiting your approval.")
                 return
 
         queries = generate_improvement_queries(phase)
 
-        # For simplicity, we only propose the first idea generated
         if not queries:
             log_change("Reflection finished", "No improvement queries generated.")
+            get_alerts().append("Reflection: No viable improvement queries could be generated at this time.")
             return
 
         q = queries[0]
-        eval_prompt = f"Is this small, safe patch incremental? Answer YES or NO. {q}"
+        # Use a more descriptive prompt for the self-check LLM
+        eval_prompt = f"Analyze the following improvement query for safety, scope, and feasibility: '{q}'. Respond ONLY with the single word 'YES' if it is a small, safe, incremental patch, otherwise respond ONLY with the single word 'NO'."
         eval_response = process_query(eval_prompt, history=[])
 
         if "yes" in str(eval_response).lower():
             log_change("Patch Proposal Generated", f"Query: {q}")
 
-            # Save the proposal to the global state for the web app to pick up
             with PENDING_PATCH:
                 PENDING_PATCH_QUERY = q
                 PENDING_PATCH_TESTS = test_cases
-                PENDING_PATCH_TARGET = 'core.py' # Default target
+                PENDING_PATCH_TARGET = 'core.py'
                 log_change("Patch Proposal Awaiting Approval", q)
+                # Success message is handled by the patch proposal polling mechanism showing the card
         else:
             log_change("Patch Proposal Rejected by Self-Evaluation", q)
+            # CRITICAL FIX: Push failure reason to the alert queue
+            get_alerts().append(f"Reflection Failed: Self-evaluation rejected the query, '{q}'.")
 
     except Exception as e:
         log_change("Reflection error", str(e))
+        get_alerts().append(f"Reflection Error: An unexpected error occurred during the process: {e}")
 
 def process_patch_decision(decision):
     """Called by the web API to handle user's patch approval or rejection."""
@@ -87,7 +95,6 @@ def process_patch_decision(decision):
         tests = PENDING_PATCH_TESTS
         target = PENDING_PATCH_TARGET
 
-        # Clear the pending state immediately after retrieving
         PENDING_PATCH_QUERY = None
         PENDING_PATCH_TESTS = None
 
@@ -99,14 +106,14 @@ def process_patch_decision(decision):
                 advance_phase()
                 return f"Patch applied successfully! Advanced to Phase {get_current_phase()}"
             except Exception as e:
-                return f"Patch failed to apply/test: {e}"
+                # Ensure the exception message is clear
+                return f"Patch execution failed. Codebase rolled back. Error: {e}"
         else:
             log_change("User Rejected Patch", q)
-            return "Patch proposal rejected."
+            return "Patch proposal rejected by user."
 
 # Example (comment out for production)
 if __name__ == "__main__":
     tests = [("hello", "Hello! How can I help?"), ("sort 3 1 2", [1, 2, 3])]
-    # Now non-interactive in main module loop
     reflect_and_expand(tests)
 

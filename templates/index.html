@@ -12,6 +12,7 @@
         .message { margin: 10px 0; padding: 12px; border-radius: 8px; max-width: 80%; word-wrap: break-word; }
         .user { background: #007bff; color: white; text-align: right; margin-left: auto; border-bottom-right-radius: 2px; }
         .ai { background: #e9ecef; color: black; text-align: left; border-bottom-left-radius: 2px; }
+        .system-info { background: #d1ecf1; color: #0c5460; text-align: center; font-style: italic; font-size: 0.9em; }
         #input-form { display: flex; gap: 10px; }
         #message { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
         button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; transition: background 0.3s; }
@@ -72,12 +73,11 @@
         const patchTargetEl = document.getElementById('patch-target');
         const patchTestsCountEl = document.getElementById('patch-tests-count');
 
-        let isLoading = false; // Prevent multiple requests
+        let isLoading = false; 
 
-        function addMessage(content, isUser) {
+        function addMessage(content, isUser, isSystemInfo = false) {
             const div = document.createElement('div');
-            div.className = `message ${isUser ? 'user' : 'ai'}`;
-            // Preserve line breaks for system alerts/long responses
+            div.className = `message ${isUser ? 'user' : (isSystemInfo ? 'system-info' : 'ai')}`;
             div.innerHTML = content.replace(/\n/g, '<br>'); 
             chatContainer.appendChild(div);
             chatContainer.scrollTop = chatContainer.scrollHeight;
@@ -113,7 +113,7 @@
         }
 
         async function sendDecision(decision) {
-            patchCard.style.display = 'none'; // Hide card immediately
+            patchCard.style.display = 'none'; 
             addMessage(`User decision: ${decision.toUpperCase()}. Processing patch...`, true);
 
             try {
@@ -123,23 +123,26 @@
                     body: JSON.stringify({decision: decision})
                 });
                 const data = await res.json();
-                // The result of the patch decision is handled via the alert queue
-                addMessage(data.message, false); 
-                fetchPhaseStatus(); // Check phase status after decision
+                addMessage(data.message, false, true); // System info style
+                fetchPhaseStatus(); 
             } catch (err) {
                 addMessage('Decision Error: ' + err.message, false);
             }
         }
 
-        window.sendDecision = sendDecision; // Make function globally accessible from HTML
+        window.sendDecision = sendDecision; 
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (isLoading) return;
 
-            const userInput = messageInput.value;
+            const userInput = messageInput.value.trim();
             if (!userInput) return;
 
+            // Special handling for commands to provide immediate feedback
+            const isCommand = ['reflect', 'advance'].includes(userInput.toLowerCase());
+
+            // 1. Add user message immediately
             addMessage(userInput, true);
             messageInput.value = '';
             isLoading = true;
@@ -152,11 +155,16 @@
                 });
                 const data = await res.json();
 
-                // Re-render chat from history for persistence
+                // 2. Clear history and re-render from server response
                 chatContainer.innerHTML = '';
                 data.history.forEach(h => {
                     addMessage(h.user, true);
-                    addMessage(h.ai, false);
+                    // Check if AI response is a system command confirmation
+                    if (h.user.toLowerCase() === 'reflect' && h.ai.startsWith("Reflection process initiated")) {
+                         addMessage(h.ai, false, true); // System info style
+                    } else {
+                         addMessage(h.ai, false);
+                    }
                 });
 
             } catch (err) {
@@ -166,21 +174,22 @@
             }
         });
 
-        // Poll for system alerts (includes decision results and resource monitor warnings)
+        // Poll for system alerts
         setInterval(async () => {
             try {
                 const res = await fetch('/alerts');
                 const data = await res.json();
                 if (data.alerts && data.alerts.length > 0) {
-                    data.alerts.forEach(alert => addMessage(`[System Alert]: ${alert}`, false));
+                    // Display alerts using the system info style
+                    data.alerts.forEach(alert => addMessage(`[System Alert]: ${alert}`, false, true)); 
                 }
             } catch (err) {
                 console.warn('Alert poll failed:', err);
             }
-        }, 3000); // Poll every 3 seconds
+        }, 3000); 
 
         // Poll for patch proposals
-        setInterval(fetchPatchProposal, 5000); // Poll every 5 seconds
+        setInterval(fetchPatchProposal, 5000); 
 
         // Initial setup
         fetchPhaseStatus();
