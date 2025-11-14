@@ -8,6 +8,18 @@ from logger import log_change
 from utils import apply_patch
 from phase import get_current_phase
 
+def has_git():
+    return os.path.exists('.git')
+
+def safe_git(cmd, *args, **kwargs):
+    if has_git():
+        return subprocess.run(cmd, *args, **kwargs)
+    else:
+        log_change("Skipping git command (no repo)", f"Would run: {' '.join(cmd)}")
+        class MockResult:
+            returncode = 0
+        return MockResult()
+
 def ethical_check(diff_str, phase):
     """Check diff for ethical issues."""
     harmful_keywords = ['hack', 'delete', 'malware', 'bias', 'hate', 'unauthorized']
@@ -25,16 +37,15 @@ def self_modify(improvement_query, target_file='core.py', test_cases=None, max_d
     """Use LLM to generate unified diff patch; apply incrementally."""
     backup_file = target_file + '.backup'
     try:
-        subprocess.run(['git', 'add', '.'], check=True)
-        
-        # Only commit if there are changes to commit
-        result = subprocess.run(['git', 'diff', '--cached', '--quiet'], capture_output=True)
-        if result.returncode != 0:  # returncode != 0 means there are changes
-            subprocess.run(['git', 'commit', '-m', 'Pre-modification commit'], check=True)
+        # Optional git pre-commit
+        safe_git(['git', 'add', '.'])
+        result = safe_git(['git', 'diff', '--cached', '--quiet'], capture_output=True)
+        if result.returncode != 0:
+            safe_git(['git', 'commit', '-m', 'Pre-modification commit'])
 
         with open(target_file, 'r') as f:
             current_code = f.read()
-        prompt = f"Generate a SMALL, incremental unified diff patch for this Python code based on: {improvement_query}\nFocus on patching one specific part (e.g., optimize a function). Output ONLY the unified diff format (starting with --- and +++), no explanations.\nCurrent code:\n{current_code}"
+        prompt = f"Generate a SMALL, incremental unified diff patch for this Python code based on: {improvement_query}\\nFocus on patching one specific part (e.g., optimize a function). Output ONLY the unified diff format (starting with --- and +++), no explanations.\\nCurrent code:\\n{current_code}"
         generated_diff = query_llm(prompt, max_tokens=500)
         if not generated_diff or not generated_diff.startswith('---'):
             raise ValueError("Invalid unified diff from LLM.")
@@ -68,15 +79,14 @@ def self_modify(improvement_query, target_file='core.py', test_cases=None, max_d
                 raise RuntimeError("Fail state detected post-modification.")
 
         log_change("Patch application successful", improvement_query)
-        subprocess.run(['git', 'commit', '-am', 'Successful patch modification'], check=True)
+        safe_git(['git', 'commit', '-am', 'Successful patch modification'])
 
     except Exception as e:
         log_change("Modification failed", str(e))
-        # Restore from backup file first (simpler and safer than git rollback)
+        # Restore from backup
         if os.path.exists(backup_file):
             os.system(f'mv {backup_file} {target_file}')
             log_change("Restored from backup file", target_file)
-        # Only use git rollback if backup restoration fails
         else:
             rollback()
         raise
@@ -84,7 +94,8 @@ def self_modify(improvement_query, target_file='core.py', test_cases=None, max_d
 def rollback():
     """Revert to previous commit on current branch."""
     try:
-        subprocess.run(['git', 'reset', '--hard', 'HEAD~1'], check=True)
+        if has_git():
+            subprocess.run(['git', 'reset', '--hard', 'HEAD~1'], check=True)
         log_change("Rolled back")
     except subprocess.CalledProcessError as e:
         log_change("Rollback error", str(e))

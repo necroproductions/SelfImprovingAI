@@ -57,10 +57,10 @@ args = "python test.py"
 outputType = "console"
 
 [[workflows.workflow]]
-name = "analyze"
-mode = "sequential"
+name = "Main"
+mode = "parallel"
 author = 640404
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python analyze.py"
+args = "python app.py"

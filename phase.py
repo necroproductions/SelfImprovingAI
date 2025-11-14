@@ -5,6 +5,7 @@ from logger import log_change
 
 PHASE_FILE = 'phase.json'
 PHASES = [
+    "Phase 0: Basic setup and optimization of existing functions.",
     "Phase 1: Patch to optimize existing functions for efficiency (e.g., better algorithms).",
     "Phase 2: Patch to add simple new functions (e.g., basic math or string ops).",
     "Phase 3: Patch to introduce state and memory for query history.",
