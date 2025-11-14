@@ -1,43 +1,38 @@
-# llm_query.py: Updated LLM query using 2025 Hugging Face endpoint
-import requests
-import os
+# analyze.py: Enhanced performance analysis (full file)
+import time
+import ast  # For syntax checking
 
-def query_llm(prompt, model="meta-llama/Meta-Llama-3-8B-Instruct", max_tokens=200):
-    """Query Hugging Face's new OpenAI-compatible API for code generation."""
-    api_key = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
-    if not api_key:
-        raise ValueError("HF_TOKEN or HF_API_KEY not set.")
-    url = "https://router.huggingface.co/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
-        "temperature": 0.7  # For creative code gen
-    }
-    response = None
+def analyze_performance(func, test_cases):
+    """Run tests and measure time/accuracy."""
+    results = []
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        generated = response.json()["choices"][0]["message"]["content"].strip()
-        return generated
-    except requests.exceptions.RequestException as e:
-        print(f"LLM query error: {e}")
-        if response is not None:
-            try:
-                error_details = response.json()
-                print(f"Error details: {error_details}")
-            except:
-                print(f"Response text: {response.text}")
-        return None
-    except KeyError:
-        print("Invalid response from LLM.")
-        return None
+        for case, expected in test_cases:
+            start = time.time()
+            result = func(case)
+            end = time.time()
+            accuracy = 1 if result == expected else 0
+            results.append({"time": end - start, "accuracy": accuracy})
+        avg_time = sum(r["time"] for r in results) / len(results)
+        avg_acc = sum(r["accuracy"] for r in results) / len(results)
+        return {"avg_time": avg_time, "avg_acc": avg_acc}
+    except Exception as e:
+        log_change("Analysis error", str(e))
+        return {"avg_time": float('inf'), "avg_acc": 0}
 
-# Test prompt for code generation
-test_prompt = "Write a Python function to implement quicksort algorithm."
-generated_code = query_llm(test_prompt)
-print(generated_code if generated_code else "Error occurred.")
+def detect_fail_state(perf_metrics, generated_code, threshold_acc=0.8, threshold_time=1.0, min_code_len=50):
+    """Check performance and code quality."""
+    try:
+        if perf_metrics['avg_acc'] < threshold_acc or perf_metrics['avg_time'] > threshold_time:
+            return True
+        if len(generated_code) < min_code_len:
+            return True  # Too short, likely failure
+        ast.parse(generated_code)  # Syntax check
+        return False
+    except (KeyError, SyntaxError) as e:
+        log_change("Fail state detected", str(e))
+        return True
+
+# Example
+tests = [("hello", "Hello! How can I help?"), ("sort 3 1 2", [1, 2, 3])]
+metrics = analyze_performance(process_query, tests)
+print(detect_fail_state(metrics, "def func(): pass", min_code_len=10))
