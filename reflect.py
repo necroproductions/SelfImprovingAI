@@ -60,8 +60,10 @@ def reflect_and_expand(test_cases):
             return
 
         q = queries[0]
-        # Use a more descriptive prompt for the self-check LLM
-        eval_prompt = f"Analyze the following improvement query for safety, scope, and feasibility: '{q}'. Respond ONLY with the single word 'YES' if it is a small, safe, incremental patch, otherwise respond ONLY with the single word 'NO'."
+
+        # CRITICAL FIX: Improved self-evaluation prompt
+        eval_prompt = f"Is the following patch query a single, atomic, and incremental change? Respond ONLY with the single word 'YES' or 'NO'. Query: '{q}'"
+
         eval_response = process_query(eval_prompt, history=[])
 
         if "yes" in str(eval_response).lower():
@@ -72,11 +74,9 @@ def reflect_and_expand(test_cases):
                 PENDING_PATCH_TESTS = test_cases
                 PENDING_PATCH_TARGET = 'core.py'
                 log_change("Patch Proposal Awaiting Approval", q)
-                # Success message is handled by the patch proposal polling mechanism showing the card
         else:
             log_change("Patch Proposal Rejected by Self-Evaluation", q)
-            # CRITICAL FIX: Push failure reason to the alert queue
-            get_alerts().append(f"Reflection Failed: Self-evaluation rejected the query, '{q}'.")
+            get_alerts().append(f"Reflection Failed: Self-evaluation rejected the query because it was not considered atomic or incremental: '{q}'.")
 
     except Exception as e:
         log_change("Reflection error", str(e))

@@ -19,30 +19,35 @@ def handle_query(user_input):
     """Wrapper for process_query with history management."""
     history = session.get('conversation_history', [])
 
+    response = ""
+
     if user_input.lower() == 'reflect':
         tests = [("hello", "Hello! How can I help?"), ("sort 5 3 1", [1, 3, 5]), ("add 2 3", 5)]
         log_change("Reflection triggered by web user")
 
         # Start reflection in a background thread to prevent blocking the web request
-        # Reflection will update the PENDING_PATCH_QUERY global state if successful.
         threading.Thread(target=lambda: reflect_and_expand(tests), daemon=True).start()
 
-        return "Reflection process initiated. Check the 'Patch Proposal' area for results soon."
+        response = "Reflection process initiated. Check the 'Patch Proposal' area for results soon."
 
     elif user_input.lower() == 'advance':
         advance_phase()
         new_phase = get_current_phase()
-        return f"Advanced to Phase {new_phase}. New Goal: {PHASES[new_phase] if new_phase < len(PHASES) else 'Terminal'}"
+        response = f"Advanced to Phase {new_phase}. New Goal: {PHASES[new_phase] if new_phase < len(PHASES) else 'Terminal'}"
 
     else:
         response = process_query(user_input, history)
-        history.append((user_input, response))
-        session['conversation_history'] = history
 
-        alerts = get_alerts()
-        if alerts:
-            response += f"\n\n[System Alert]: {'; '.join(alerts)}"
-        return response
+    # CRITICAL FIX: Record the interaction in history regardless of whether it was a command or a query.
+    history.append((user_input, response))
+    session['conversation_history'] = history
+
+    # Append Alerts (if any)
+    alerts = get_alerts()
+    if alerts:
+        response += f"\n\n[System Alert]: {'; '.join(alerts)}"
+
+    return response
 
 @app.route('/')
 def index():
@@ -72,8 +77,6 @@ def get_phase_status():
     phase_detail = PHASES[current] if current < len(PHASES) else 'Terminal'
     return jsonify({'phase': current, 'detail': phase_detail})
 
-# --- New Endpoints for Patch Management ---
-
 @app.route('/patch/proposal', methods=['GET'])
 def patch_proposal():
     """Polls for a pending patch proposal."""
@@ -92,18 +95,13 @@ def patch_decide():
     """Accepts the user's decision (approve/reject)."""
     decision = request.json.get('decision', '').lower()
 
-    # Run the decision process in a separate thread so the web request doesn't block the UI
-    # for the entire duration of LLM call, patch generation, and testing.
     def run_decision(decision):
         result = process_patch_decision(decision)
-        # Log result so the user sees it in the alerts queue
         get_alerts().append(result)
 
     threading.Thread(target=lambda: run_decision(decision), daemon=True).start()
 
     return jsonify({'message': f'Decision "{decision}" is being processed in the background.'})
-
-# ------------------------------------------
 
 if __name__ == '__main__':
     print("Starting web AI interface... Open / in browser.")
