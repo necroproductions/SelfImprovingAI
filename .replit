@@ -30,6 +30,10 @@ author = "agent"
 task = "workflow.run"
 args = "run"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "monitor"
+
 [[workflows.workflow]]
 name = "run"
 author = "agent"
@@ -37,6 +41,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python main.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "monitor"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python test.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
