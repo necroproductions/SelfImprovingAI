@@ -1,38 +1,56 @@
-# analyze.py: Enhanced performance analysis (full file)
-import time
-import ast  # For syntax checking
+# llm_query.py: LLM query with caching
+import requests
+import os
+import json
+from logger import log_change
 
-def analyze_performance(func, test_cases):
-    """Run tests and measure time/accuracy."""
-    results = []
+CACHE_FILE = 'llm_cache.json'
+
+def load_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_cache(cache):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f)
+
+def query_llm(prompt, model="bigcode/starcoder2-3b", max_tokens=200):
+    """Query Hugging Face API (initially); cache results."""
+    cache = load_cache()
+    if prompt in cache:
+        return cache[prompt]
+
+    api_key = os.environ.get("HF_API_KEY")
+    if not api_key:
+        raise ValueError("HF_API_KEY not set.")
+    url = "https://router.huggingface.co/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0.7
+    }
     try:
-        for case, expected in test_cases:
-            start = time.time()
-            result = func(case)
-            end = time.time()
-            accuracy = 1 if result == expected else 0
-            results.append({"time": end - start, "accuracy": accuracy})
-        avg_time = sum(r["time"] for r in results) / len(results)
-        avg_acc = sum(r["accuracy"] for r in results) / len(results)
-        return {"avg_time": avg_time, "avg_acc": avg_acc}
-    except Exception as e:
-        log_change("Analysis error", str(e))
-        return {"avg_time": float('inf'), "avg_acc": 0}
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        generated = response.json()["choices"][0]["message"]["content"].strip()
+        if generated:
+            cache[prompt] = generated
+            save_cache(cache)
+        return generated
+    except requests.exceptions.RequestException as e:
+        log_change("LLM query error", str(e))
+        return None
+    except KeyError:
+        log_change("Invalid LLM response")
+        return None
 
-def detect_fail_state(perf_metrics, generated_code, threshold_acc=0.8, threshold_time=1.0, min_code_len=50):
-    """Check performance and code quality."""
-    try:
-        if perf_metrics['avg_acc'] < threshold_acc or perf_metrics['avg_time'] > threshold_time:
-            return True
-        if len(generated_code) < min_code_len:
-            return True  # Too short, likely failure
-        ast.parse(generated_code)  # Syntax check
-        return False
-    except (KeyError, SyntaxError) as e:
-        log_change("Fail state detected", str(e))
-        return True
-
-# Example
-tests = [("hello", "Hello! How can I help?"), ("sort 3 1 2", [1, 2, 3])]
-metrics = analyze_performance(process_query, tests)
-print(detect_fail_state(metrics, "def func(): pass", min_code_len=10))
+# Test (comment out for production)
+if __name__ == "__main__":
+    print(query_llm("Write a simple Python hello world."))

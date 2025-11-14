@@ -5,7 +5,7 @@ def process_query(query):
         if "hello" in query.lower():
             return "Hello! How can I help?"
         elif "sort" in query.lower():
-            # Basic sorting example as nod to initial idea
+            # Basic sorting example
             numbers = [int(x) for x in query.split()[1:]]  # e.g., "sort 3 1 2"
             return sorted(numbers)
         else:
@@ -15,6 +15,7 @@ def process_query(query):
     except Exception as e:
         return f"Unexpected error: {e}"
 
-# Test
-print(process_query("hello"))
-print(process_query("sort 5 3 1"))
+# Test (comment out for production)
+if __name__ == "__main__":
+    print(process_query("hello"))
+    print(process_query("sort 5 3 1"))

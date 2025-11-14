@@ -1,4 +1,4 @@
-# logger.py: Enhanced logging (full file)
+# logger.py: Enhanced logging
 import datetime
 import os
 
@@ -20,5 +20,6 @@ def log_change(message, details=None, prompt=None, generated=None):
     except Exception as e:
         print(f"Unexpected logging error: {e}")
 
-# Example usage
-log_change("Test log", details="Detail here", prompt="Test prompt", generated="Test code")
+# Example usage (comment out for production)
+if __name__ == "__main__":
+    log_change("Test log", details="Detail here", prompt="Test prompt", generated="Test code")
