@@ -5,51 +5,144 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Self-Improving AI Assistant</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f0f0f0; }
-        #chat-container { background: white; border-radius: 10px; padding: 20px; height: 500px; overflow-y: auto; margin-bottom: 20px; }
-        .message { margin: 10px 0; padding: 10px; border-radius: 5px; }
-        .user { background: #007bff; color: white; text-align: right; }
-        .ai { background: #e9ecef; color: black; }
-        #input-form { display: flex; }
-        #message { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
-        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; margin-left: 10px; }
-        #status { font-size: 0.9em; color: #666; margin-top: 10px; }
+        body { font-family: 'Inter', Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f0f4f8; color: #333; }
+        h1 { color: #007bff; text-align: center; }
+        #app-container { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); padding: 20px; }
+        #chat-container { height: 400px; overflow-y: auto; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        .message { margin: 10px 0; padding: 12px; border-radius: 8px; max-width: 80%; word-wrap: break-word; }
+        .user { background: #007bff; color: white; text-align: right; margin-left: auto; border-bottom-right-radius: 2px; }
+        .ai { background: #e9ecef; color: black; text-align: left; border-bottom-left-radius: 2px; }
+        #input-form { display: flex; gap: 10px; }
+        #message { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
+        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; transition: background 0.3s; }
+        button:hover { background: #0056b3; }
+        #status { font-size: 0.9em; color: #666; margin-top: 15px; display: flex; justify-content: space-between; align-items: center;}
+
+        /* Patch Proposal Modal/Card */
+        #patch-card { 
+            background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; 
+            padding: 15px; border-radius: 8px; margin-bottom: 20px; 
+            display: none; /* Hidden by default */
+        }
+        #patch-card button { 
+            padding: 8px 15px; margin-left: 10px; font-size: 0.9em;
+            background: #28a745; 
+        }
+        #patch-card .reject-btn { background: #dc3545; }
+
     </style>
 </head>
 <body>
-    <h1>🤖 Self-Improving AI Chat</h1>
-    <p>Commands: Type "reflect" to self-improve, "advance" to next phase, or chat normally.</p>
-    <div id="chat-container"></div>
-    <form id="input-form">
-        <input type="text" id="message" placeholder="Enter your query..." autocomplete="off">
-        <button type="submit">Send</button>
-    </form>
-    <div id="status">Phase: <span id="phase">Loading...</span></div>
+    <div id="app-container">
+        <h1>🤖 Self-Improving AI Chat</h1>
+        <p style="text-align: center; font-size: 0.9em; color: #666;">
+            Commands: Type "reflect" to propose a self-improvement, "advance" to jump to next phase.
+        </p>
+
+        <!-- Patch Proposal Card -->
+        <div id="patch-card">
+            <strong>🚀 Self-Improvement Proposal Ready!</strong>
+            <p id="patch-query" style="margin: 5px 0;"></p>
+            <small>Target: <span id="patch-target"></span> | Tests: <span id="patch-tests-count"></span></small>
+            <div style="margin-top: 10px; text-align: right;">
+                <button class="reject-btn" onclick="sendDecision('reject')">Reject</button>
+                <button onclick="sendDecision('approve')">Approve Patch</button>
+            </div>
+        </div>
+
+        <div id="chat-container"></div>
+        <form id="input-form">
+            <input type="text" id="message" placeholder="Enter your query..." autocomplete="off">
+            <button type="submit">Send</button>
+        </form>
+        <div id="status">
+            <span>Phase: <strong id="phase-num">Loading...</strong></span>
+            <span id="phase-detail"></span>
+        </div>
+    </div>
 
     <script>
         const chatContainer = document.getElementById('chat-container');
         const messageInput = document.getElementById('message');
         const form = document.getElementById('input-form');
-        const phaseSpan = document.getElementById('phase');
+        const phaseNumSpan = document.getElementById('phase-num');
+        const phaseDetailSpan = document.getElementById('phase-detail');
+        const patchCard = document.getElementById('patch-card');
+        const patchQueryEl = document.getElementById('patch-query');
+        const patchTargetEl = document.getElementById('patch-target');
+        const patchTestsCountEl = document.getElementById('patch-tests-count');
 
-        // Load initial phase (fetch from server if needed)
-        fetch('/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({message: 'phase'}) })
-            .then(res => res.json()).then(data => phaseSpan.textContent = data.response || '0');
+        let isLoading = false; // Prevent multiple requests
 
         function addMessage(content, isUser) {
             const div = document.createElement('div');
             div.className = `message ${isUser ? 'user' : 'ai'}`;
-            div.textContent = content;
+            // Preserve line breaks for system alerts/long responses
+            div.innerHTML = content.replace(/\n/g, '<br>'); 
             chatContainer.appendChild(div);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
+        async function fetchPhaseStatus() {
+            try {
+                const res = await fetch('/phase');
+                const data = await res.json();
+                phaseNumSpan.textContent = data.phase;
+                phaseDetailSpan.textContent = data.detail;
+            } catch (err) {
+                console.error('Failed to fetch phase status:', err);
+            }
+        }
+
+        async function fetchPatchProposal() {
+            try {
+                const res = await fetch('/patch/proposal');
+                const data = await res.json();
+
+                if (data.status === 'pending') {
+                    patchQueryEl.textContent = data.query;
+                    patchTargetEl.textContent = data.target;
+                    patchTestsCountEl.textContent = data.tests_count;
+                    patchCard.style.display = 'block';
+                } else {
+                    patchCard.style.display = 'none';
+                }
+            } catch (err) {
+                console.warn('Patch proposal poll failed:', err);
+            }
+        }
+
+        async function sendDecision(decision) {
+            patchCard.style.display = 'none'; // Hide card immediately
+            addMessage(`User decision: ${decision.toUpperCase()}. Processing patch...`, true);
+
+            try {
+                const res = await fetch('/patch/decide', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({decision: decision})
+                });
+                const data = await res.json();
+                // The result of the patch decision is handled via the alert queue
+                addMessage(data.message, false); 
+                fetchPhaseStatus(); // Check phase status after decision
+            } catch (err) {
+                addMessage('Decision Error: ' + err.message, false);
+            }
+        }
+
+        window.sendDecision = sendDecision; // Make function globally accessible from HTML
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (isLoading) return;
+
             const userInput = messageInput.value;
             if (!userInput) return;
+
             addMessage(userInput, true);
             messageInput.value = '';
+            isLoading = true;
 
             try {
                 const res = await fetch('/chat', {
@@ -58,36 +151,41 @@
                     body: JSON.stringify({message: userInput})
                 });
                 const data = await res.json();
-                addMessage(data.response, false);
-                // Update history if sent
-                if (data.history) {
-                    // Re-render chat from history for persistence
-                    chatContainer.innerHTML = '';
-                    data.history.forEach(h => {
-                        addMessage(h.user, true);
-                        addMessage(h.ai, false);
-                    });
-                }
+
+                // Re-render chat from history for persistence
+                chatContainer.innerHTML = '';
+                data.history.forEach(h => {
+                    addMessage(h.user, true);
+                    addMessage(h.ai, false);
+                });
+
             } catch (err) {
                 addMessage('Error: ' + err.message, false);
+            } finally {
+                isLoading = false;
             }
         });
 
-        // Poll for system alerts every 10s
+        // Poll for system alerts (includes decision results and resource monitor warnings)
         setInterval(async () => {
             try {
                 const res = await fetch('/alerts');
                 const data = await res.json();
                 if (data.alerts && data.alerts.length > 0) {
-                    data.alerts.forEach(alert => addMessage(`[System]: ${alert}`, false));
+                    data.alerts.forEach(alert => addMessage(`[System Alert]: ${alert}`, false));
                 }
             } catch (err) {
                 console.warn('Alert poll failed:', err);
             }
-        }, 10000);
+        }, 3000); // Poll every 3 seconds
 
-        // Focus input
+        // Poll for patch proposals
+        setInterval(fetchPatchProposal, 5000); // Poll every 5 seconds
+
+        // Initial setup
+        fetchPhaseStatus();
         messageInput.focus();
     </script>
 </body>
 </html>
+

@@ -2,47 +2,43 @@ from flask import Flask, render_template, request, jsonify, session
 import threading
 import os
 import time
-from monitor import monitor_resources, get_alerts  # CORRECTED IMPORT
-from reflect import reflect_and_expand, get_current_phase
+from monitor import monitor_resources, get_alerts
+from reflect import reflect_and_expand, get_current_phase, PENDING_PATCH, PENDING_PATCH_QUERY, process_patch_decision, PENDING_PATCH_TESTS, PENDING_PATCH_TARGET
 from core import process_query
 from logger import log_change
-from phase import advance_phase
+from phase import advance_phase, PHASES
 from core import process_query
 
 app = Flask(__name__)
-# Using a key to enable sessions, which is crucial for per-user history
 app.secret_key = 'self_improving_ai_secret' 
 
-# Start quiet monitoring in background (Daemon thread ensures cleanup on exit)
-# Note: The monitor only logs/queues alerts; it doesn't crash the server.
+# Start quiet monitoring in background
 threading.Thread(target=lambda: monitor_resources(quiet=True), daemon=True).start()
 
 def handle_query(user_input):
     """Wrapper for process_query with history management."""
-    # Retrieve or initialize conversation history from session
     history = session.get('conversation_history', [])
 
-    # 1. Handle Meta-Commands (Reflect/Advance)
     if user_input.lower() == 'reflect':
-        tests = [("hello", "Hello! How can I help?"), ("sort 5 3 1", [1, 3, 5])]
-        # The web version must be non-interactive (auto-approve=True not implemented in reflect.py, but mock response)
+        tests = [("hello", "Hello! How can I help?"), ("sort 5 3 1", [1, 3, 5]), ("add 2 3", 5)]
         log_change("Reflection triggered by web user")
-        # Since reflection is complex and non-blocking, we mock a brief confirmation.
+
+        # Start reflection in a background thread to prevent blocking the web request
+        # Reflection will update the PENDING_PATCH_QUERY global state if successful.
         threading.Thread(target=lambda: reflect_and_expand(tests), daemon=True).start()
-        return "Reflection triggered in background. Check logs for progress. Phase change may happen soon."
+
+        return "Reflection process initiated. Check the 'Patch Proposal' area for results soon."
 
     elif user_input.lower() == 'advance':
         advance_phase()
         new_phase = get_current_phase()
-        return f"Advanced to Phase {new_phase} manually. New Goal: {PHASES[new_phase] if new_phase < len(PHASES) else 'Terminal'}"
+        return f"Advanced to Phase {new_phase}. New Goal: {PHASES[new_phase] if new_phase < len(PHASES) else 'Terminal'}"
 
-    # 2. Handle Core Query
     else:
         response = process_query(user_input, history)
         history.append((user_input, response))
-        session['conversation_history'] = history  # Save updated history
+        session['conversation_history'] = history
 
-        # 3. Append Alerts (if any)
         alerts = get_alerts()
         if alerts:
             response += f"\n\n[System Alert]: {'; '.join(alerts)}"
@@ -54,14 +50,11 @@ def index():
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Handles user messages and returns AI response."""
     user_input = request.json.get('message', '').strip()
     if not user_input:
         return jsonify({'error': 'Empty message'})
 
     response = handle_query(user_input)
-
-    # Return history only for the current user's session
     recent_history = session.get('conversation_history', [])[-20:]
 
     return jsonify({
@@ -69,22 +62,51 @@ def chat():
         'history': [{'user': u, 'ai': a} for u, a in recent_history]
     })
 
-@app.route('/alerts', methods=['GET'])  # Poll for alerts
+@app.route('/alerts', methods=['GET'])
 def alerts():
-    """Returns system alerts for the UI to display."""
     return jsonify({'alerts': get_alerts()})
 
 @app.route('/phase', methods=['GET'])
 def get_phase_status():
-    """Returns the current phase for UI initialization."""
-    from phase import PHASES
     current = get_current_phase()
     phase_detail = PHASES[current] if current < len(PHASES) else 'Terminal'
     return jsonify({'phase': current, 'detail': phase_detail})
 
+# --- New Endpoints for Patch Management ---
+
+@app.route('/patch/proposal', methods=['GET'])
+def patch_proposal():
+    """Polls for a pending patch proposal."""
+    with PENDING_PATCH:
+        if PENDING_PATCH_QUERY:
+            return jsonify({
+                'status': 'pending',
+                'query': PENDING_PATCH_QUERY,
+                'target': PENDING_PATCH_TARGET,
+                'tests_count': len(PENDING_PATCH_TESTS) if PENDING_PATCH_TESTS else 0
+            })
+        return jsonify({'status': 'none'})
+
+@app.route('/patch/decide', methods=['POST'])
+def patch_decide():
+    """Accepts the user's decision (approve/reject)."""
+    decision = request.json.get('decision', '').lower()
+
+    # Run the decision process in a separate thread so the web request doesn't block the UI
+    # for the entire duration of LLM call, patch generation, and testing.
+    def run_decision(decision):
+        result = process_patch_decision(decision)
+        # Log result so the user sees it in the alerts queue
+        get_alerts().append(result)
+
+    threading.Thread(target=lambda: run_decision(decision), daemon=True).start()
+
+    return jsonify({'message': f'Decision "{decision}" is being processed in the background.'})
+
+# ------------------------------------------
+
 if __name__ == '__main__':
-    from phase import PHASES
     print("Starting web AI interface... Open / in browser.")
     print(f"Current Phase: {get_current_phase()} ({PHASES[get_current_phase()]})")
-    app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False) 
+    app.run(host='0.0.0.0', port=8080, debug=True, use_reloader=False)
 
