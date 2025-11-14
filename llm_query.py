@@ -16,15 +16,15 @@ def save_cache(cache):
     with open(CACHE_FILE, 'w') as f:
         json.dump(cache, f)
 
-def query_llm(prompt, model="bigcode/starcoder2-3b", max_tokens=200):
+def query_llm(prompt, model="meta-llama/Meta-Llama-3-8B-Instruct", max_tokens=200):
     """Query Hugging Face API (initially); cache results."""
     cache = load_cache()
     if prompt in cache:
         return cache[prompt]
 
-    api_key = os.environ.get("HF_API_KEY")
+    api_key = os.environ.get("HF_TOKEN") or os.environ.get("HF_API_KEY")
     if not api_key:
-        raise ValueError("HF_API_KEY not set.")
+        raise ValueError("HF_TOKEN or HF_API_KEY not set.")
     url = "https://router.huggingface.co/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -36,6 +36,7 @@ def query_llm(prompt, model="bigcode/starcoder2-3b", max_tokens=200):
         "max_tokens": max_tokens,
         "temperature": 0.7
     }
+    response = None
     try:
         response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
@@ -46,6 +47,12 @@ def query_llm(prompt, model="bigcode/starcoder2-3b", max_tokens=200):
         return generated
     except requests.exceptions.RequestException as e:
         log_change("LLM query error", str(e))
+        if response is not None:
+            try:
+                error_details = response.json()
+                log_change("LLM error details", str(error_details))
+            except:
+                pass
         return None
     except KeyError:
         log_change("Invalid LLM response")
