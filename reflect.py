@@ -2,9 +2,9 @@ import os
 import threading
 from core import process_query
 from logger import log_change
-from phase import get_current_phase, advance_phase, PHASES
-# Import get_alerts from monitor to push failed reflection messages to UI
+# Removed: from phase import get_current_phase, advance_phase, PHASES
 from monitor import get_alerts 
+from modify import self_modify # Must import self_modify here to use it in process_patch_decision
 
 # --- New Global State for Web Interaction ---
 # Store patch proposals waiting for user approval
@@ -14,36 +14,30 @@ PENDING_PATCH_TESTS = None
 PENDING_PATCH_TARGET = 'core.py'
 # -------------------------------------------
 
-def generate_improvement_queries(phase):
-    """Generate phase-specific patch queries."""
+# New, high-level continuous goal for the LLM to target
+CONTINUOUS_GOAL = "towards a general intelligence system"
+
+def generate_improvement_queries():
+    """Query the LLM for a single, incremental improvement idea based on the continuous goal."""
     try:
-        base_queries = {
-            0: ["Patch sorting for faster performance on large lists."],
-            1: ["Patch to add a simple math addition handler to queries."],
-            2: ["Patch to add query history memory to remember last input."],
-            3: ["Patch to handle follow-up questions based on history."],
-            4: ["Patch to implement a basic template-based code generator to reduce LLM dependency."]
-        }.get(phase, [])
+        # Instruction focuses on continuous, incremental improvement without phase limits
+        prompt = f"As a world-class AI developer, propose ONE single, atomic, and incremental improvement to move the current codebase closer to achieving general intelligence. State the improvement concisely as a patch request (e.g., 'Patch to add feature X'). The current high-level goal is: {CONTINUOUS_GOAL}"
+
         # Call process_query without history to prevent reflection from causing new reflection
-        self_idea = process_query(f"Suggest one small patch idea for {PHASES[phase]}", history=[]) 
+        self_idea = process_query(prompt, history=[]) 
+
         if isinstance(self_idea, str) and self_idea:
-            base_queries.append(self_idea)
-        return base_queries
+            # We return a list containing the single best idea found
+            return [self_idea]
+        return []
     except Exception as e:
         log_change("Query generation error", str(e))
         return []
 
 def reflect_and_expand(test_cases):
-    """Reflect phase-by-phase without interactive prompts."""
+    """Continuously reflect and propose patches towards the abstract goal."""
     global PENDING_PATCH_QUERY, PENDING_PATCH_TESTS, PENDING_PATCH_TARGET
     try:
-        phase = get_current_phase()
-
-        # Check if reached terminal phase
-        if phase >= len(PHASES):
-            log_change("System reached terminal phase", "All self-improvement phases complete")
-            get_alerts().append("System reached terminal phase.")
-            return
 
         # Check if a patch is already pending
         with PENDING_PATCH:
@@ -52,7 +46,7 @@ def reflect_and_expand(test_cases):
                 get_alerts().append("Reflection paused: A patch is already awaiting your approval.")
                 return
 
-        queries = generate_improvement_queries(phase)
+        queries = generate_improvement_queries()
 
         if not queries:
             log_change("Reflection finished", "No improvement queries generated.")
@@ -61,7 +55,7 @@ def reflect_and_expand(test_cases):
 
         q = queries[0]
 
-        # CRITICAL FIX: Improved self-evaluation prompt
+        # Self-evaluation focuses purely on the atomicity and scope control (as requested by user)
         eval_prompt = f"Is the following patch query a single, atomic, and incremental change? Respond ONLY with the single word 'YES' or 'NO'. Query: '{q}'"
 
         eval_response = process_query(eval_prompt, history=[])
@@ -85,7 +79,6 @@ def reflect_and_expand(test_cases):
 def process_patch_decision(decision):
     """Called by the web API to handle user's patch approval or rejection."""
     global PENDING_PATCH_QUERY, PENDING_PATCH_TESTS, PENDING_PATCH_TARGET
-    from modify import self_modify
 
     with PENDING_PATCH:
         if PENDING_PATCH_QUERY is None:
@@ -101,10 +94,11 @@ def process_patch_decision(decision):
         if decision.lower() == 'approve':
             log_change("User Approved Patch", q)
             try:
-                # Execution happens in the main thread for simplicity, blocking web response briefly
-                self_modify(q, target_file=target, test_cases=tests, max_diff_lines=30)
-                advance_phase()
-                return f"Patch applied successfully! Advanced to Phase {get_current_phase()}"
+                # Removed max_diff_lines limit. Scope is controlled by LLM instruction.
+                self_modify(q, target_file=target, test_cases=tests) 
+
+                # Removed advance_phase() call. The system just returns to reflection loop.
+                return f"Patch applied successfully! The system will now continue its self-improvement cycle."
             except Exception as e:
                 # Ensure the exception message is clear
                 return f"Patch execution failed. Codebase rolled back. Error: {e}"

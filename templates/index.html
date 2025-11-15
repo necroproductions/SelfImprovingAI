@@ -37,7 +37,7 @@
     <div id="app-container">
         <h1>🤖 Self-Improving AI Chat</h1>
         <p style="text-align: center; font-size: 0.9em; color: #666;">
-            Commands: Type "reflect" to propose a self-improvement, "advance" to jump to next phase.
+            Commands: Type **reflect** to propose a self-improvement idea.
         </p>
 
         <!-- Patch Proposal Card -->
@@ -57,8 +57,7 @@
             <button type="submit">Send</button>
         </form>
         <div id="status">
-            <span>Phase: <strong id="phase-num">Loading...</strong></span>
-            <span id="phase-detail"></span>
+            <span>Goal: <strong id="goal-detail">Loading...</strong></span>
         </div>
     </div>
 
@@ -66,8 +65,9 @@
         const chatContainer = document.getElementById('chat-container');
         const messageInput = document.getElementById('message');
         const form = document.getElementById('input-form');
-        const phaseNumSpan = document.getElementById('phase-num');
-        const phaseDetailSpan = document.getElementById('phase-detail');
+        // Renamed status elements
+        const goalDetailSpan = document.getElementById('goal-detail'); 
+
         const patchCard = document.getElementById('patch-card');
         const patchQueryEl = document.getElementById('patch-query');
         const patchTargetEl = document.getElementById('patch-target');
@@ -83,14 +83,40 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        async function fetchPhaseStatus() {
+        function renderHistory(history) {
+            chatContainer.innerHTML = '';
+            history.forEach(h => {
+                const isSystemCommand = ['reflect', 'advance'].includes(h.user.toLowerCase());
+                addMessage(h.user, true);
+                // Updated check for system command confirmations
+                if (isSystemCommand && (h.ai.includes("process initiated") || h.ai.includes("deprecated"))) {
+                     addMessage(h.ai, false, true); // Use system-info style for command confirmations
+                } else {
+                     addMessage(h.ai, false);
+                }
+            });
+        }
+
+        async function fetchAndRenderHistory() {
             try {
-                const res = await fetch('/phase');
+                const res = await fetch('/history');
                 const data = await res.json();
-                phaseNumSpan.textContent = data.phase;
-                phaseDetailSpan.textContent = data.detail;
+                renderHistory(data.history);
             } catch (err) {
-                console.error('Failed to fetch phase status:', err);
+                console.error('Failed to fetch initial history:', err);
+                addMessage('System Error: Could not load history.', false, true);
+            }
+        }
+
+        // Renamed function to reflect new continuous goal status endpoint
+        async function fetchGoalStatus() {
+            try {
+                const res = await fetch('/status');
+                const data = await res.json();
+                goalDetailSpan.textContent = data.goal;
+            } catch (err) {
+                console.error('Failed to fetch status:', err);
+                goalDetailSpan.textContent = 'Error loading goal.';
             }
         }
 
@@ -123,8 +149,7 @@
                     body: JSON.stringify({decision: decision})
                 });
                 const data = await res.json();
-                addMessage(data.message, false, true); // System info style
-                fetchPhaseStatus(); 
+                addMessage(data.message, false, true); 
             } catch (err) {
                 addMessage('Decision Error: ' + err.message, false);
             }
@@ -139,9 +164,6 @@
             const userInput = messageInput.value.trim();
             if (!userInput) return;
 
-            // Special handling for commands to provide immediate feedback
-            const isCommand = ['reflect', 'advance'].includes(userInput.toLowerCase());
-
             // 1. Add user message immediately
             addMessage(userInput, true);
             messageInput.value = '';
@@ -155,17 +177,8 @@
                 });
                 const data = await res.json();
 
-                // 2. Clear history and re-render from server response
-                chatContainer.innerHTML = '';
-                data.history.forEach(h => {
-                    addMessage(h.user, true);
-                    // Check if AI response is a system command confirmation
-                    if (h.user.toLowerCase() === 'reflect' && h.ai.startsWith("Reflection process initiated")) {
-                         addMessage(h.ai, false, true); // System info style
-                    } else {
-                         addMessage(h.ai, false);
-                    }
-                });
+                // 2. Re-render chat from history
+                renderHistory(data.history);
 
             } catch (err) {
                 addMessage('Error: ' + err.message, false);
@@ -174,13 +187,12 @@
             }
         });
 
-        // Poll for system alerts
+        // Poll for system alerts (includes decision results and reflection failures)
         setInterval(async () => {
             try {
                 const res = await fetch('/alerts');
                 const data = await res.json();
                 if (data.alerts && data.alerts.length > 0) {
-                    // Display alerts using the system info style
                     data.alerts.forEach(alert => addMessage(`[System Alert]: ${alert}`, false, true)); 
                 }
             } catch (err) {
@@ -191,8 +203,9 @@
         // Poll for patch proposals
         setInterval(fetchPatchProposal, 5000); 
 
-        // Initial setup
-        fetchPhaseStatus();
+        // Initial setup on page load
+        fetchGoalStatus(); // Load the new continuous goal status
+        fetchAndRenderHistory(); 
         messageInput.focus();
     </script>
 </body>
